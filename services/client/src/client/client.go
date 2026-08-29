@@ -3,7 +3,10 @@ package client
 import (
 	"net"
 	"time"
-
+	"encoding/csv"
+	"os"
+	"io"
+	"strings"
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/logger"
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/safe_socket"
 )
@@ -19,6 +22,8 @@ type ClientConfig struct {
 	ServerHost string
 	ServerPort string
 	AgencyId   string
+	InputFile  string
+	OutputFile string
 }
 
 type Client struct {
@@ -62,13 +67,38 @@ func (client *Client) Run() error {
 	const mainAction = "test-echo-server"
 	defer client.conn.Close()
 
-	for messageId := range ECHO_CLIENT_MESSAGE_AMOUNT {
-		messageArgs := []any{"agency-id", client.config.AgencyId, "message-id", messageId}
+	messageArgs := []any{"agency-id", client.config.AgencyId}
+	file, err := os.Open(client.config.InputFile)
+	if err != nil {
+		logger.Error("input-file-open", logger.Fail, messageArgs...)
+		return err
+	}
+	defer file.Close()
+
+	outputFile, err := os.OpenFile(client.config.OutputFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
+	if err != nil {
+		logger.Error("output-file-open", logger.Fail, messageArgs...)
+		return err
+	}
+	defer outputFile.Close()
+
+	writer := csv.NewWriter(outputFile)
+	defer writer.Flush()
+
+	reader := csv.NewReader(file)
+
+	for {
+		record, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			logger.Error("file-read", logger.Fail, messageArgs...)
+		}
+		rowContent := client.config.AgencyId + "," + strings.Join(record,",")
+		messageArgs = append(messageArgs, "message", rowContent)
 		logger.Info(mainAction, logger.InProgress, messageArgs...)
-
-		clientMessage := client.config.AgencyId
-
-		if err := safe_socket.SendAll(client.conn, []byte(clientMessage)); err != nil {
+		if err := safe_socket.SendAll(client.conn, []byte(rowContent)); err != nil {
 			logger.Error("send-message", logger.Fail, messageArgs...)
 			return err
 		}
@@ -79,10 +109,14 @@ func (client *Client) Run() error {
 			return err
 		}
 
-		if string(responseBuffer) != clientMessage {
+		if string(responseBuffer) != rowContent {
 			logger.Error("check-response", logger.Fail, messageArgs...)
 			return err
 		}
+
+		outputRow := strings.Split(string(responseBuffer), ",")
+		writer.Write(outputRow)
+		logger.Info("output-written", logger.Success, "agency-id", client.config.AgencyId, "content", outputRow)
 
 		time.Sleep(ECHO_CLIENT_MESSAGE_DELAY_MS * time.Millisecond)
 	}
