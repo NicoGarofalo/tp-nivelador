@@ -16,7 +16,7 @@ const CONNECTION_ATTEMPS_DELAY_MS = 200
 
 const ECHO_CLIENT_BUFFER_SIZE = 512
 const ECHO_CLIENT_MESSAGE_AMOUNT = 3
-const ECHO_CLIENT_MESSAGE_DELAY_MS = 1000
+const ECHO_CLIENT_MESSAGE_DELAY_MS = 10
 
 type ClientConfig struct {
 	ServerHost string
@@ -88,14 +88,14 @@ func (client *Client) Run() error {
 	reader := csv.NewReader(file)
 
 	for {
-		record, err := reader.Read()
+		line, err := reader.Read()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
 			logger.Error("file-read", logger.Fail, messageArgs...)
 		}
-		rowContent := client.config.AgencyId + "," + strings.Join(record,",")
+		rowContent := client.config.AgencyId + "," + strings.Join(line,",")
 		messageArgs = append(messageArgs, "message", rowContent)
 		logger.Info(mainAction, logger.InProgress, messageArgs...)
 		if err := safe_socket.SendAll(client.conn, []byte(rowContent)); err != nil {
@@ -103,7 +103,8 @@ func (client *Client) Run() error {
 			return err
 		}
 
-		responseBuffer, err := safe_socket.RecvAll(client.conn, ECHO_CLIENT_BUFFER_SIZE)
+		// Envio temporalmente len de rowContent pero para el Ej 6 debería cambiarse.
+		responseBuffer, err := safe_socket.RecvAll(client.conn, len(rowContent))
 		if err != nil {
 			logger.Error("recv-response", logger.Fail, messageArgs...)
 			return err
