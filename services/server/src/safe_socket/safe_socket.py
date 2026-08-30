@@ -1,5 +1,6 @@
 import socket
 
+
 def recv_all(socket: socket.socket, size):
     total_bytes_received = 0
     buffer = bytearray()

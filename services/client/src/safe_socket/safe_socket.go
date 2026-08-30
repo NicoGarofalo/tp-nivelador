@@ -1,8 +1,31 @@
 package safe_socket
 
-import "io"
+import (
+	"encoding/binary"
+	"io"
+)
+
+const TWO_BYTES_SIZE = 2
+
+// Ver despues de mover esto a protocol.go o similar
+func SerializeNumber(number uint16) []byte {
+	numberBuffer := make([]byte, TWO_BYTES_SIZE)
+	binary.BigEndian.PutUint16(numberBuffer, number)
+	return numberBuffer
+}
+
+// Ver despues de mover esto a protocol.go o similar
+func DeserializeNumber(numberBuffer []byte) uint16 {
+	return binary.BigEndian.Uint16(numberBuffer)
+}
 
 func SendAll(socket io.Writer, bytes []byte) error {
+	// Envío el size del mensaje
+	message_size := uint16(len(bytes))
+	size_serialized := SerializeNumber(message_size)
+	sendAll(socket, size_buffer)
+
+	// Envío el mensaje
 	total_bytes_sent := 0
 	msg_size := len(bytes)
 	for total_bytes_sent < msg_size {
