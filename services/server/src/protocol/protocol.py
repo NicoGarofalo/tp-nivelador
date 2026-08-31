@@ -4,7 +4,7 @@ from enum import Enum, auto
 
 class MessageType(Enum):
     HANDSHAKE = auto()
-    BET = auto()
+    BETS = auto()
     END_BETS = auto()
 
 
@@ -15,14 +15,15 @@ class Protocol:
 
     #Codigos interno entre protocolos
     _INTERNAL_HANDHSAKE_CODE = 0x01
-    _INTERNAL_BET_CODE = 0x02
-    _INTERNAL_WINNER_CODE = 0x03
-    _INTERNAL_END_BETS_CODE = 0x04
-    _INTERNAL_END_WINNERS_CODE = 0x05
+    _INTERNAL_BATCH_BET_CODE = 0x02
+    _INTERNAL_BATCH_ACK = 0x03
+    _INTERNAL_WINNER_CODE = 0x04
+    _INTERNAL_END_BETS_CODE = 0x05
+    _INTERNAL_END_WINNERS_CODE = 0x06
 
     _CODE_TO_MESSAGE_TYPE = {
         _INTERNAL_HANDHSAKE_CODE: MessageType.HANDSHAKE,
-        _INTERNAL_BET_CODE: MessageType.BET,
+        _INTERNAL_BATCH_BET_CODE: MessageType.BETS,
         _INTERNAL_END_BETS_CODE: MessageType.END_BETS
     }
 
@@ -47,8 +48,8 @@ class Protocol:
         bet_stringified = f"{bet.agency_id},{bet.first_name},{bet.last_name},{bet.document},{bet.birthdate},{bet.number}"
         return bet_stringified.encode('utf-8')
 
-    def _deserialize_bet(self,serialized_bet):
-        deserialized_bet = serialized_bet.decode('utf-8').split(',')
+    def _deserialize_bet(self, serialized_bet):
+        deserialized_bet = serialized_bet.split(',')
         return Bet(
             agency_id=int(deserialized_bet[0]),
             first_name=deserialized_bet[1],
@@ -57,6 +58,13 @@ class Protocol:
             birthdate=deserialized_bet[4],
             number=int(deserialized_bet[5])
         )
+
+    def _deserialize_batch_bets(self,serialized_batch_bet):
+        batches_splitted = serialized_batch_bet.decode('utf-8').split('\n')
+        bet_list = []
+        for bet_string in batches_splitted:
+            bet_list.append(self._deserialize_bet(bet_string))
+        return bet_list
 
     def _deserialize_agency_id(self, agency_id_serialized):
         agency_id = agency_id_serialized.decode('utf-8')
@@ -82,9 +90,12 @@ class Protocol:
 
         return message_serialized
 
-    def recv_bet(self):
+    def recv_bets(self):
         message_serialized = self._recv_message()
-        return self._deserialize_bet(message_serialized)
+        return self._deserialize_batch_bets(message_serialized)
+
+    def send_batch_processed(self):
+        self._send_message(self._INTERNAL_BATCH_ACK)
     
     def recv_agency_id(self):
         message_serialized = self._recv_message()
