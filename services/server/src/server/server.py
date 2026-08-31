@@ -1,34 +1,69 @@
 import socket
 import logger
-import safe_socket
+from protocol import Protocol, MessageType
+from lottery import Lottery
 
-_ECHO_SERVER_MESSAGE_SIZE = 1024
 
 
 class Server:
     def __init__(self, server_host: str, server_port: int) -> None:
         self.server_host = server_host
         self.server_port = server_port
+        self.lottery = Lottery("bets.csv")
 
     def _handle_client(self, client_socket):
         action = "handle-client"
         message_amount = 0
+
+        server_protocol = Protocol(client_socket)
+
+        # Recibo agency id como primer mensaje o handshake.
+        agency_id = -1
+        
+        client_bets = []
         try:
             logger.info(action, logger.LogResult.in_progress)
             while True:
-                client_message = safe_socket.recv_all(
-                    client_socket, _ECHO_SERVER_MESSAGE_SIZE
-                )
-                if not client_message:
+                msg_type = server_protocol.recv_code()
+
+                if msg_type == None:
+                    logger.error("recv_code", logger.LogResult.fail, "messages-amount", message_amount)
+                    return
+                
+                if msg_type == MessageType.BET:
+                    client_bet = server_protocol.recv_bet()
+                    message_amount += 1
+                    client_bets.append(client_bet)
+                    logger.info("save-bet-memory", logger.LogResult.success, "bet", client_bet)
+                
+                elif msg_type == MessageType.HANDSHAKE:
+                    agency_id = server_protocol.recv_agency_id()
+                    logger.info(action, logger.LogResult.success, "handshake", "agency-id", agency_id)
+                    
+                elif msg_type == MessageType.END_BETS:
                     logger.info(
                         action,
                         logger.LogResult.success,
                         "messages-amount",
                         message_amount,
                     )
-                    return
-                message_amount += 1
-                safe_socket.send_all(client_socket, client_message)
+                    break
+
+            # Guardo las apuestas
+            self.lottery.store_bets(client_bets)
+            logger.info("save-bets-disk", logger.LogResult.success, "bets-amount", len(client_bets))
+
+            # Cuento los ganadores
+            all_bets = self.lottery.load_bets()
+            winning_bets = []
+            for bet in all_bets:
+                if agency_id == bet.agency_id and self.lottery.has_won(bet):
+                    winning_bets.append(bet)
+
+            # Envío los ganadores al client x
+            logger.info("send-winners", logger.LogResult.in_progress, "agency-id", agency_id, "bets-amount", len(winning_bets))
+            server_protocol.send_winning_bets(winning_bets)
+            logger.info("send-winners", logger.LogResult.success, "agency-id", agency_id, "bets-amount", len(winning_bets))
         except Exception as e:
             logger.error(
                 action, logger.LogResult.fail, "messages-amount", message_amount

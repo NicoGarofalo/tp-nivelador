@@ -8,15 +8,11 @@ import (
 	"io"
 	"strings"
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/logger"
-	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/safe_socket"
+	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/protocol"
 )
 
 const CONNECTION_ATTEMPTS_MAX = 3
 const CONNECTION_ATTEMPS_DELAY_MS = 200
-
-const ECHO_CLIENT_BUFFER_SIZE = 512
-const ECHO_CLIENT_MESSAGE_AMOUNT = 3
-const ECHO_CLIENT_MESSAGE_DELAY_MS = 1000
 
 type ClientConfig struct {
 	ServerHost string
@@ -64,20 +60,74 @@ func connectToServer(host, port string) (net.Conn, error) {
 }
 
 func (client *Client) Run() error {
-	const mainAction = "test-echo-server"
+	const mainAction = "test-send-bet"
 	defer client.conn.Close()
 
-	messageArgs := []any{"agency-id", client.config.AgencyId}
+	messageLog := []any{"agency-id", client.config.AgencyId}
+
+	// Abro archivo input-x.csv
 	file, err := os.Open(client.config.InputFile)
 	if err != nil {
-		logger.Error("input-file-open", logger.Fail, messageArgs...)
+		logger.Error("input-file-open", logger.Fail, messageLog...)
 		return err
 	}
 	defer file.Close()
 
+	reader := csv.NewReader(file)
+	clientProtocol := protocol.NewProtocol(client.conn)
+
+	// Envío agency id para comenzar comunicacion
+	if err := clientProtocol.SendAgencyId(client.config.AgencyId); err != nil {
+		logger.Error("send-agency-id", logger.Fail, messageLog...)
+		return err
+	}
+	logger.Info("send-agency-id", logger.Success, messageLog...)
+
+	for {
+		// Leo linea de input-x.csv
+		line, err := reader.Read()
+		if err == io.EOF {
+			if err := clientProtocol.SendMessageBetsEnd(); err != nil {
+				logger.Error("send-message-bets-end", logger.Fail, messageLog...)
+				return err
+			}
+			logger.Info("send-message-bets-end", logger.Success, messageLog...)
+			break
+		}
+		if err != nil {
+			logger.Error("file-read", logger.Fail, messageLog...)
+		}
+
+		// Junto la linea en string
+		rowContent := client.config.AgencyId + "," + strings.Join(line,",")
+		logger.Info(mainAction, logger.InProgress, "message", rowContent)
+
+		// Envío linea a server
+		if err := clientProtocol.SendBet(rowContent); err != nil {
+			logger.Error(mainAction, logger.Fail, "message", rowContent)
+			return err
+		}
+	}
+	
+	// Recibo los ganadores
+	winners := []string{}
+	for {
+		logger.Info("receive-winners", logger.InProgress, messageLog...)
+		winner, err := clientProtocol.RecvWinner()
+		if winner == "" {
+			break
+		}
+		if err != nil {
+			logger.Error("receive-winners", logger.Fail, messageLog...)
+			break
+		}
+		winners = append(winners, winner)
+	}
+
+	// Creo archivo output-x.csv y lo abro
 	outputFile, err := os.OpenFile(client.config.OutputFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
 	if err != nil {
-		logger.Error("output-file-open", logger.Fail, messageArgs...)
+		logger.Error("output-file-open", logger.Fail, messageLog...)
 		return err
 	}
 	defer outputFile.Close()
@@ -85,40 +135,10 @@ func (client *Client) Run() error {
 	writer := csv.NewWriter(outputFile)
 	defer writer.Flush()
 
-	reader := csv.NewReader(file)
-
-	for {
-		record, err := reader.Read()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			logger.Error("file-read", logger.Fail, messageArgs...)
-		}
-		rowContent := client.config.AgencyId + "," + strings.Join(record,",")
-		messageArgs = append(messageArgs, "message", rowContent)
-		logger.Info(mainAction, logger.InProgress, messageArgs...)
-		if err := safe_socket.SendAll(client.conn, []byte(rowContent)); err != nil {
-			logger.Error("send-message", logger.Fail, messageArgs...)
-			return err
-		}
-
-		responseBuffer, err := safe_socket.RecvAll(client.conn, ECHO_CLIENT_BUFFER_SIZE)
-		if err != nil {
-			logger.Error("recv-response", logger.Fail, messageArgs...)
-			return err
-		}
-
-		if string(responseBuffer) != rowContent {
-			logger.Error("check-response", logger.Fail, messageArgs...)
-			return err
-		}
-
-		outputRow := strings.Split(string(responseBuffer), ",")
-		writer.Write(outputRow)
-		logger.Info("output-written", logger.Success, "agency-id", client.config.AgencyId, "content", outputRow)
-
-		time.Sleep(ECHO_CLIENT_MESSAGE_DELAY_MS * time.Millisecond)
+	for _, winner := range winners {
+		winnerSplitted := strings.Split(winner,",")
+		writer.Write(winnerSplitted)
+		logger.Info("output-written", logger.Success, "agency-id", client.config.AgencyId, "content", winner)
 	}
 	logger.Info(mainAction, logger.Success, "agency-id", client.config.AgencyId)
 
