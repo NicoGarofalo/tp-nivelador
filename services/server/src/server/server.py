@@ -30,11 +30,12 @@ class Server:
                     logger.error("recv_code", logger.LogResult.fail, "messages-amount", message_amount)
                     return
                 
-                if msg_type == MessageType.BET:
-                    client_bet = server_protocol.recv_bet()
-                    message_amount += 1
-                    client_bets.append(client_bet)
-                    logger.info("save-bet-memory", logger.LogResult.success, "bet", client_bet)
+                if msg_type == MessageType.BETS:
+                    bets = server_protocol.recv_bets()
+                    self.lottery.store_bets(bets)
+                    server_protocol.send_batch_processed()
+                    message_amount += len(bets)
+                    logger.info("save-bets-disk", logger.LogResult.success, "bets-amount", len(bets))
                 
                 elif msg_type == MessageType.HANDSHAKE:
                     agency_id = server_protocol.recv_agency_id()
@@ -48,10 +49,6 @@ class Server:
                         message_amount,
                     )
                     break
-
-            # Guardo las apuestas
-            self.lottery.store_bets(client_bets)
-            logger.info("save-bets-disk", logger.LogResult.success, "bets-amount", len(client_bets))
 
             # Cuento los ganadores
             all_bets = self.lottery.load_bets()

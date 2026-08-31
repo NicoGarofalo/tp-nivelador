@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"net"
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/safe_socket"
+	"strings"
 )
 
 const LENGTH_MSG_BYTES_SIZE = 2
@@ -15,10 +16,11 @@ type Protocol struct {
 
 const (
 	internalHandshakeCode  byte = 0x01
-	internalBetCode        byte = 0x02
-	internalWinnerCode     byte = 0x03
-	internalEndBetsCode    byte = 0x04
-	internalEndWinnersCode byte = 0x05
+	internalBatchBetCode   byte = 0x02
+	internalBatchAck	   byte = 0x03
+	internalWinnerCode     byte = 0x04
+	internalEndBetsCode    byte = 0x05
+	internalEndWinnersCode byte = 0x06
 )
 
 
@@ -60,8 +62,21 @@ func (p *Protocol) SendAgencyId(agencyId string) error {
 	return p.sendMessage(internalHandshakeCode, agencyId)
 }
 
-func (p *Protocol) SendBet(bet string) error {
-	return p.sendMessage(internalBetCode, bet)
+func (p *Protocol) SendBetBatch(bet_batch []string) error {
+	batch_joined := strings.Join(bet_batch, "\n")
+	if err := p.sendMessage(internalBatchBetCode, batch_joined); err != nil {
+		return err
+	}
+	
+	ackCode, err := p.recvCode()
+	if err != nil {
+		return err
+	}
+	// Aca no se bien como handlear. Como creo errores?
+	if ackCode != internalBatchAck {
+		return nil
+	}
+	return nil
 }
 
 func (p *Protocol) SendMessageBetsEnd()  error {

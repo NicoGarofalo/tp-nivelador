@@ -20,6 +20,7 @@ type ClientConfig struct {
 	AgencyId   string
 	InputFile  string
 	OutputFile string
+	BatchSize int
 }
 
 type Client struct {
@@ -83,10 +84,25 @@ func (client *Client) Run() error {
 	}
 	logger.Info("send-agency-id", logger.Success, messageLog...)
 
+	bet_batch := make([]string, 0, client.config.BatchSize)
 	for {
 		// Leo linea de input-x.csv
 		line, err := reader.Read()
+		if err != nil && err != io.EOF {
+			logger.Error("file-read", logger.Fail, messageLog...)
+			return err
+		}
+		
+		// Envío linea a server si el batch esta completo o si es la ultima linea
 		if err == io.EOF {
+			if len(bet_batch) > 0 {
+				if err := clientProtocol.SendBetBatch(bet_batch); err != nil {
+					logger.Error(mainAction, logger.Fail, "message", bet_batch)
+					return err
+				}
+				logger.Info("send-bet-batch", logger.Success, "agency-id", client.config.AgencyId, "batch-size-sent", len(bet_batch))
+				bet_batch = make([]string, 0, client.config.BatchSize)
+			}
 			if err := clientProtocol.SendMessageBetsEnd(); err != nil {
 				logger.Error("send-message-bets-end", logger.Fail, messageLog...)
 				return err
@@ -94,18 +110,17 @@ func (client *Client) Run() error {
 			logger.Info("send-message-bets-end", logger.Success, messageLog...)
 			break
 		}
-		if err != nil {
-			logger.Error("file-read", logger.Fail, messageLog...)
-		}
-
-		// Junto la linea en string
+		
+		// Junto la linea en string y agrego a batch
 		rowContent := client.config.AgencyId + "," + strings.Join(line,",")
-		logger.Info(mainAction, logger.InProgress, "message", rowContent)
-
-		// Envío linea a server
-		if err := clientProtocol.SendBet(rowContent); err != nil {
-			logger.Error(mainAction, logger.Fail, "message", rowContent)
-			return err
+		bet_batch = append(bet_batch, rowContent)
+		if len(bet_batch) == client.config.BatchSize {
+			if err := clientProtocol.SendBetBatch(bet_batch); err != nil {
+				logger.Error(mainAction, logger.Fail, "message", bet_batch)
+				return err
+			}
+			logger.Info("send-bet-batch", logger.Success, "agency-id", client.config.AgencyId, "batch-size-sent", len(bet_batch))
+			bet_batch = make([]string, 0, client.config.BatchSize)
 		}
 	}
 	
