@@ -45,7 +45,7 @@ class Protocol:
         return int.from_bytes(number_buffer, byteorder=self._BIG_ENDIAN_FORMAT)
 
     def _serialize_bet(self, bet):
-        bet_stringified = f"{bet.agency_id},{bet.first_name},{bet.last_name},{bet.document},{bet.birthdate},{bet.number}"
+        bet_stringified = f"{bet.first_name},{bet.last_name},{bet.document},{bet.birthdate},{bet.number}"
         return bet_stringified.encode('utf-8')
 
     def _deserialize_bet(self, serialized_bet):

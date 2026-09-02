@@ -3,7 +3,7 @@ package client
 import (
 	"net"
 	"time"
-	"encoding/csv"
+	"encoding/csv" // Sacarlo y hacer que ande sin esto
 	"os"
 	"io"
 	"strings"

@@ -1,7 +1,7 @@
 package protocol
 
 import (
-	"encoding/binary"
+	"encoding/binary" // Chequear si se puede usar 
 	"net"
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/safe_socket"
 	"strings"

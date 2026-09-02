@@ -1,15 +1,16 @@
 import socket
 import logger
+import threading
 from protocol import Protocol, MessageType
-from lottery import Lottery
+from lottery_monitor import LotteryMonitor
 
 
 
 class Server:
-    def __init__(self, server_host: str, server_port: int) -> None:
+    def __init__(self, server_host: str, server_port: int, agency_quorum_min: int) -> None:
         self.server_host = server_host
         self.server_port = server_port
-        self.lottery = Lottery("bets.csv")
+        self.lottery_monitor = LotteryMonitor("bets.csv", agency_quorum_min)
 
     def _handle_client(self, client_socket):
         action = "handle-client"
@@ -32,7 +33,7 @@ class Server:
                 
                 if msg_type == MessageType.BETS:
                     bets = server_protocol.recv_bets()
-                    self.lottery.store_bets(bets)
+                    self.lottery_monitor.store_bets(bets)
                     server_protocol.send_batch_processed()
                     message_amount += len(bets)
                     logger.info("save-bets-disk", logger.LogResult.success, "bets-amount", len(bets))
@@ -51,11 +52,7 @@ class Server:
                     break
 
             # Cuento los ganadores
-            all_bets = self.lottery.load_bets()
-            winning_bets = []
-            for bet in all_bets:
-                if agency_id == bet.agency_id and self.lottery.has_won(bet):
-                    winning_bets.append(bet)
+            winning_bets = self.lottery_monitor.get_winners(agency_id)
 
             # Envío los ganadores al client x
             logger.info("send-winners", logger.LogResult.in_progress, "agency-id", agency_id, "bets-amount", len(winning_bets))
@@ -76,9 +73,12 @@ class Server:
                 try:
                     logger.info(action, logger.LogResult.in_progress)
                     client_socket, _ = server_socket.accept()
+                    client_thread = threading.Thread(
+                        target=self._handle_client,
+                        args=(client_socket,)
+                    )
+                    client_thread.start()
+                    logger.info(action, logger.LogResult.success)
                 except Exception as e:
                     logger.error(action, logger.LogResult.fail)
                     raise e
-                logger.info(action, logger.LogResult.success)
-
-                self._handle_client(client_socket)
