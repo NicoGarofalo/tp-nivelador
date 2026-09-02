@@ -3,7 +3,9 @@ package main
 import (
 	"errors"
 	"os"
-	"strconv" // chequear si se puede usar
+	"os/signal"
+	"strconv"
+	"syscall"
 	client "github.com/7574-sistemas-distribuidos/tp-nivelador/src/client"
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/logger"
 )
@@ -53,18 +55,30 @@ func loadConfig() (client.ClientConfig, error) {
 	}, nil
 }
 
+func handle_sigterm(sigChan chan os.Signal, c *client.Client, agencyId string) {
+	signal := <- sigChan
+	logger.Info("handle-sigterm", logger.Success, "signal received", signal, "agency-id", agencyId)
+	c.Stop()
+	os.Exit(0)
+}
+
 func run() int {
 	config, err := loadConfig()
 	if err != nil {
 		logger.Error("load-config", logger.Fail, "err", err)
 		return 1
 	}
-
+	
 	client, err := client.NewClient(config)
 	if err != nil {
 		logger.Error("client-new", logger.Fail, "err", err)
 		return 1
 	}
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
+
+	go handle_sigterm(sigChan, client, config.AgencyId)
 
 	if err := client.Run(); err != nil {
 		logger.Error("client-run", logger.Fail, "err", err)

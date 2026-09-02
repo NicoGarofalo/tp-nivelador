@@ -1,12 +1,11 @@
 package client
 
 import (
+	"bufio"
 	"net"
-	"time"
-	"encoding/csv" // Sacarlo y hacer que ande sin esto
 	"os"
-	"io"
-	"strings"
+	"time"
+
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/logger"
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/protocol"
 )
@@ -74,7 +73,7 @@ func (client *Client) Run() error {
 	}
 	defer file.Close()
 
-	reader := csv.NewReader(file)
+	scanner := bufio.NewScanner(file)
 	clientProtocol := protocol.NewProtocol(client.conn)
 
 	// Envío agency id para comenzar comunicacion
@@ -85,34 +84,14 @@ func (client *Client) Run() error {
 	logger.Info("send-agency-id", logger.Success, messageLog...)
 
 	bet_batch := make([]string, 0, client.config.BatchSize)
-	for {
-		// Leo linea de input-x.csv
-		line, err := reader.Read()
-		if err != nil && err != io.EOF {
-			logger.Error("file-read", logger.Fail, messageLog...)
-			return err
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
 		}
-		
-		// Envío linea a server si el batch esta completo o si es la ultima linea
-		if err == io.EOF {
-			if len(bet_batch) > 0 {
-				if err := clientProtocol.SendBetBatch(bet_batch); err != nil {
-					logger.Error(mainAction, logger.Fail, "message", bet_batch)
-					return err
-				}
-				logger.Info("send-bet-batch", logger.Success, "agency-id", client.config.AgencyId, "batch-size-sent", len(bet_batch))
-				bet_batch = make([]string, 0, client.config.BatchSize)
-			}
-			if err := clientProtocol.SendMessageBetsEnd(); err != nil {
-				logger.Error("send-message-bets-end", logger.Fail, messageLog...)
-				return err
-			}
-			logger.Info("send-message-bets-end", logger.Success, messageLog...)
-			break
-		}
-		
-		// Junto la linea en string y agrego a batch
-		rowContent := client.config.AgencyId + "," + strings.Join(line,",")
+
+		// Preparo el contenido de la row
+		rowContent := client.config.AgencyId + "," + line
 		bet_batch = append(bet_batch, rowContent)
 		if len(bet_batch) == client.config.BatchSize {
 			if err := clientProtocol.SendBetBatch(bet_batch); err != nil {
@@ -120,9 +99,29 @@ func (client *Client) Run() error {
 				return err
 			}
 			logger.Info("send-bet-batch", logger.Success, "agency-id", client.config.AgencyId, "batch-size-sent", len(bet_batch))
-			bet_batch = make([]string, 0, client.config.BatchSize)
+			clear(bet_batch)
+			bet_batch = bet_batch[:0]
 		}
 	}
+
+	if err := scanner.Err(); err != nil {
+		logger.Error("file-read", logger.Fail, messageLog...)
+		return err
+	}
+
+	if len(bet_batch) > 0 {
+		if err := clientProtocol.SendBetBatch(bet_batch); err != nil {
+			logger.Error(mainAction, logger.Fail, "message", bet_batch)
+			return err
+		}
+		logger.Info("send-bet-batch", logger.Success, "agency-id", client.config.AgencyId, "batch-size-sent", len(bet_batch))
+	}
+
+	if err := clientProtocol.SendMessageBetsEnd(); err != nil {
+		logger.Error("send-message-bets-end", logger.Fail, messageLog...)
+		return err
+	}
+	logger.Info("send-message-bets-end", logger.Success, messageLog...)
 	
 	// Recibo los ganadores
 	winners := []string{}
@@ -147,15 +146,23 @@ func (client *Client) Run() error {
 	}
 	defer outputFile.Close()
 
-	writer := csv.NewWriter(outputFile)
+	writer := bufio.NewWriter(outputFile)
 	defer writer.Flush()
 
 	for _, winner := range winners {
-		winnerSplitted := strings.Split(winner,",")
-		writer.Write(winnerSplitted)
+		if _, err := writer.WriteString(winner + "\n"); err != nil {
+			logger.Error("output-write", logger.Fail, "err", err)
+			return err
+		}
 		logger.Info("output-written", logger.Success, "agency-id", client.config.AgencyId, "content", winner)
 	}
 	logger.Info(mainAction, logger.Success, "agency-id", client.config.AgencyId)
 
 	return nil
+}
+
+func (client *Client) Stop() {
+	if client.conn != nil {
+		client.conn.Close()
+	}
 }
