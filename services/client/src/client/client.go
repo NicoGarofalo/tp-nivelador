@@ -5,7 +5,6 @@ import (
 	"net"
 	"os"
 	"time"
-
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/logger"
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/protocol"
 )
@@ -62,6 +61,9 @@ func connectToServer(host, port string) (net.Conn, error) {
 func (client *Client) Run() error {
 	const mainAction = "test-send-bet"
 	defer client.conn.Close()
+	
+	const estimatedBetSize = 128
+	betBufferSize := estimatedBetSize * client.config.BatchSize
 
 	messageLog := []any{"agency-id", client.config.AgencyId}
 
@@ -83,25 +85,36 @@ func (client *Client) Run() error {
 	}
 	logger.Info("send-agency-id", logger.Success, messageLog...)
 
-	bet_batch := make([]string, 0, client.config.BatchSize)
+	betBatch := make([]byte, 0, betBufferSize)
+	agencyIdInBytes := []byte(client.config.AgencyId)
+	betsCount := 0
 	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
+		line := scanner.Bytes()
+		if len(line) == 0 {
 			continue
 		}
 
-		// Preparo el contenido de la row
-		rowContent := client.config.AgencyId + "," + line
-		bet_batch = append(bet_batch, rowContent)
-		if len(bet_batch) == client.config.BatchSize {
-			if err := clientProtocol.SendBetBatch(bet_batch); err != nil {
-				logger.Error(mainAction, logger.Fail, "message", bet_batch)
+		sizeNeeded := len(agencyIdInBytes) + len(line) + 2
+		
+		if len(betBatch) > 0 && (len(betBatch) + sizeNeeded > betBufferSize || betsCount == client.config.BatchSize) {
+			if err := clientProtocol.SendBetBatch(betBatch); err != nil {
+				logger.Error(mainAction, logger.Fail, "message", betBatch)
 				return err
 			}
-			logger.Info("send-bet-batch", logger.Success, "agency-id", client.config.AgencyId, "batch-size-sent", len(bet_batch))
-			clear(bet_batch)
-			bet_batch = bet_batch[:0]
+			clear(betBatch)
+			betBatch = betBatch[:0]
+			betsCount = 0
 		}
+
+		if len(betBatch) > 0 {
+			betBatch = append(betBatch, '\n')
+		}
+
+		// Preparo el contenido de la row
+		betBatch = append(betBatch, agencyIdInBytes...)
+		betBatch = append(betBatch, ',')
+		betBatch = append(betBatch, line...)
+		betsCount++
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -109,12 +122,11 @@ func (client *Client) Run() error {
 		return err
 	}
 
-	if len(bet_batch) > 0 {
-		if err := clientProtocol.SendBetBatch(bet_batch); err != nil {
-			logger.Error(mainAction, logger.Fail, "message", bet_batch)
+	if len(betBatch) > 0 {
+		if err := clientProtocol.SendBetBatch(betBatch); err != nil {
+			logger.Error(mainAction, logger.Fail, "message", betBatch)
 			return err
 		}
-		logger.Info("send-bet-batch", logger.Success, "agency-id", client.config.AgencyId, "batch-size-sent", len(bet_batch))
 	}
 
 	if err := clientProtocol.SendMessageBetsEnd(); err != nil {

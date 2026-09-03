@@ -1,10 +1,9 @@
 package protocol
 
 import (
-	"encoding/binary" // Chequear si se puede usar 
+	"encoding/binary"
 	"net"
 	"github.com/7574-sistemas-distribuidos/tp-nivelador/src/safe_socket"
-	"strings"
 )
 
 const LENGTH_MSG_BYTES_SIZE = 2
@@ -12,6 +11,7 @@ const CODE_BYTES_SIZE = 1
 
 type Protocol struct {
 	conn net.Conn
+	sendBuffer []byte
 }
 
 const (
@@ -25,7 +25,7 @@ const (
 
 
 func NewProtocol(conn net.Conn) *Protocol {
-	return &Protocol{conn: conn}
+	return &Protocol{conn: conn, sendBuffer: make([]byte, 0, 4096) }
 }
 
 func serializeNumber(number uint16) []byte {
@@ -42,29 +42,29 @@ func deserializeNumber(numberBuffer []byte) uint16 {
 // Métodos SEND
 // ============================================
 
-func (p *Protocol) sendMessage(code byte, message string) error {
-	messageBuffer := []byte{code}
+func (p *Protocol) sendMessage(code byte, message []byte) error {
+	clear(p.sendBuffer)
+	p.sendBuffer = p.sendBuffer[:0]
+	p.sendBuffer = append(p.sendBuffer, code)
 	
 	if len(message) > 0 {
 		// Serializo tamaño del mensaje e inicializo el mensaje a enviar con el messageSize
 		messageSize := uint16(len(message))
-		messageBuffer = append(messageBuffer, serializeNumber(messageSize)...)
+		p.sendBuffer = append(p.sendBuffer, serializeNumber(messageSize)...)
 		// Appendeo el contenido del mensaje luego de su size.
-		messageBuffer = append(messageBuffer, []byte(message)...)
+		p.sendBuffer = append(p.sendBuffer, message...)
 	}
 	
 	// Envío mensaje
-	safe_socket.SendAll(p.conn, messageBuffer)
-	return nil
+	return safe_socket.SendAll(p.conn, p.sendBuffer)
 }
 
 func (p *Protocol) SendAgencyId(agencyId string) error {
-	return p.sendMessage(internalHandshakeCode, agencyId)
+	return p.sendMessage(internalHandshakeCode, []byte(agencyId))
 }
 
-func (p *Protocol) SendBetBatch(bet_batch []string) error {
-	batch_joined := strings.Join(bet_batch, "\n")
-	if err := p.sendMessage(internalBatchBetCode, batch_joined); err != nil {
+func (p *Protocol) SendBetBatch(bet_batch []byte) error {
+	if err := p.sendMessage(internalBatchBetCode, bet_batch); err != nil {
 		return err
 	}
 	
@@ -80,7 +80,7 @@ func (p *Protocol) SendBetBatch(bet_batch []string) error {
 }
 
 func (p *Protocol) SendMessageBetsEnd()  error {
-	return p.sendMessage(internalEndBetsCode, "")
+	return p.sendMessage(internalEndBetsCode, nil)
 }
 
 // ============================================
