@@ -8,6 +8,8 @@ import (
 
 const LENGTH_MSG_BYTES_SIZE = 2
 const CODE_BYTES_SIZE = 1
+const OFFSET_MSG_LEN_START = 1
+const OFFSET_MSG_LEN_END = 3
 
 type Protocol struct {
 	conn net.Conn
@@ -24,14 +26,13 @@ const (
 )
 
 
-func NewProtocol(conn net.Conn) *Protocol {
-	return &Protocol{conn: conn, sendBuffer: make([]byte, 0, 4096) }
+func NewProtocol(conn net.Conn, betBufferSize int) *Protocol {
+	bufferSize := betBufferSize + CODE_BYTES_SIZE + LENGTH_MSG_BYTES_SIZE
+	return &Protocol{conn: conn, sendBuffer: make([]byte, 0, bufferSize) }
 }
 
-func serializeNumber(number uint16) []byte {
-	numberBuffer := make([]byte, LENGTH_MSG_BYTES_SIZE)
-	binary.BigEndian.PutUint16(numberBuffer, number)
-	return numberBuffer
+func serializeNumber(dest []byte, number uint16) {
+	binary.BigEndian.PutUint16(dest, number)
 }
 
 func deserializeNumber(numberBuffer []byte) uint16 {
@@ -45,12 +46,15 @@ func deserializeNumber(numberBuffer []byte) uint16 {
 func (p *Protocol) sendMessage(code byte, message []byte) error {
 	clear(p.sendBuffer)
 	p.sendBuffer = p.sendBuffer[:0]
+
 	p.sendBuffer = append(p.sendBuffer, code)
 	
 	if len(message) > 0 {
 		// Serializo tamaño del mensaje e inicializo el mensaje a enviar con el messageSize
 		messageSize := uint16(len(message))
-		p.sendBuffer = append(p.sendBuffer, serializeNumber(messageSize)...)
+		var numberBuffer [LENGTH_MSG_BYTES_SIZE]byte
+		serializeNumber(numberBuffer[:], messageSize)
+		p.sendBuffer = append(p.sendBuffer, numberBuffer[:]...)
 		// Appendeo el contenido del mensaje luego de su size.
 		p.sendBuffer = append(p.sendBuffer, message...)
 	}

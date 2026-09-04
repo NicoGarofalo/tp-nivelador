@@ -5,7 +5,6 @@ import (
 )
 
 func SendAll(socket io.Writer, bytes []byte) error {
-	// Envío el mensaje
 	total_bytes_sent := 0
 	msg_size := len(bytes)
 	for total_bytes_sent < msg_size {

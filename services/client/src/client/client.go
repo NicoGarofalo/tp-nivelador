@@ -76,7 +76,7 @@ func (client *Client) Run() error {
 	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
-	clientProtocol := protocol.NewProtocol(client.conn)
+	clientProtocol := protocol.NewProtocol(client.conn, betBufferSize)
 
 	// Envío agency id para comenzar comunicacion
 	if err := clientProtocol.SendAgencyId(client.config.AgencyId); err != nil {
@@ -134,21 +134,6 @@ func (client *Client) Run() error {
 		return err
 	}
 	logger.Info("send-message-bets-end", logger.Success, messageLog...)
-	
-	// Recibo los ganadores
-	winners := []string{}
-	for {
-		logger.Info("receive-winners", logger.InProgress, messageLog...)
-		winner, err := clientProtocol.RecvWinner()
-		if winner == "" {
-			break
-		}
-		if err != nil {
-			logger.Error("receive-winners", logger.Fail, messageLog...)
-			break
-		}
-		winners = append(winners, winner)
-	}
 
 	// Creo archivo output-x.csv y lo abro
 	outputFile, err := os.OpenFile(client.config.OutputFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
@@ -160,16 +145,26 @@ func (client *Client) Run() error {
 
 	writer := bufio.NewWriter(outputFile)
 	defer writer.Flush()
+	
+	// Recibo los ganadores y los persisto
+	for {
+		logger.Info("receive-winners", logger.InProgress, messageLog...)
+		winner, err := clientProtocol.RecvWinner()
+		if winner == "" {
+			break
+		}
+		if err != nil {
+			logger.Error("receive-winners", logger.Fail, messageLog...)
+			break
+		}
 
-	for _, winner := range winners {
 		if _, err := writer.WriteString(winner + "\n"); err != nil {
 			logger.Error("output-write", logger.Fail, "err", err)
 			return err
 		}
-		logger.Info("output-written", logger.Success, "agency-id", client.config.AgencyId, "content", winner)
+		logger.Info("receive-winners", logger.Success, "agency-id", client.config.AgencyId)
 	}
-	logger.Info(mainAction, logger.Success, "agency-id", client.config.AgencyId)
-
+	logger.Info("output-written", logger.Success, messageLog...)
 	return nil
 }
 
