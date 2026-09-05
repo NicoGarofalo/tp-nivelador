@@ -45,11 +45,10 @@ class ClientHandler(threading.Thread):
                     )
                     break
 
-            winning_bets = self.lottery_monitor.get_winners(agency_id)
-
-            logger.info("send-winners", logger.LogResult.in_progress, "agency-id", agency_id, "bets-amount", len(winning_bets))
-            server_protocol.send_winning_bets(winning_bets)
-            logger.info("send-winners", logger.LogResult.success, "agency-id", agency_id, "bets-amount", len(winning_bets))
+            logger.info("send-winners", logger.LogResult.in_progress, "agency-id", agency_id)
+            winners = self.lottery_monitor.get_winners(agency_id)
+            server_protocol.send_winning_bets(winners)
+            logger.info("send-winners-done", logger.LogResult.success, "agency-id", agency_id)
         except Exception as e:
             logger.error(
                 action, logger.LogResult.fail, "messages-amount", message_amount

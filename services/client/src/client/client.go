@@ -58,10 +58,8 @@ func connectToServer(host, port string) (net.Conn, error) {
 	return conn, err
 }
 
-func (client *Client) Run() error {
+func (client *Client) sendBets(clientProtocol *protocol.Protocol) error {
 	const mainAction = "test-send-bet"
-	defer client.conn.Close()
-	
 	const estimatedBetSize = 128
 	betBufferSize := estimatedBetSize * client.config.BatchSize
 
@@ -76,7 +74,6 @@ func (client *Client) Run() error {
 	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
-	clientProtocol := protocol.NewProtocol(client.conn, betBufferSize)
 
 	// Envío agency id para comenzar comunicacion
 	if err := clientProtocol.SendAgencyId(client.config.AgencyId); err != nil {
@@ -104,6 +101,7 @@ func (client *Client) Run() error {
 			clear(betBatch)
 			betBatch = betBatch[:0]
 			betsCount = 0
+			logger.Info("send-batch-complete", logger.Success, "batch-size", len(betBatch))
 		}
 
 		if len(betBatch) > 0 {
@@ -134,6 +132,11 @@ func (client *Client) Run() error {
 		return err
 	}
 	logger.Info("send-message-bets-end", logger.Success, messageLog...)
+	return nil
+}
+
+func (client *Client) receiveWinners(clientProtocol *protocol.Protocol) error {
+	messageLog := []any{"agency-id", client.config.AgencyId}
 
 	// Creo archivo output-x.csv y lo abro
 	outputFile, err := os.OpenFile(client.config.OutputFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
@@ -165,6 +168,24 @@ func (client *Client) Run() error {
 		logger.Info("receive-winners", logger.Success, "agency-id", client.config.AgencyId)
 	}
 	logger.Info("output-written", logger.Success, messageLog...)
+	return nil
+}
+
+func (client *Client) Run() error {
+	defer client.conn.Close()
+	
+	const estimatedBetSize = 128
+	betBufferSize := estimatedBetSize * client.config.BatchSize
+	clientProtocol := protocol.NewProtocol(client.conn, betBufferSize)
+
+	if err := client.sendBets(clientProtocol); err != nil {
+		return err
+	}
+
+	if err := client.receiveWinners(clientProtocol); err != nil {
+		return err
+	}
+
 	return nil
 }
 

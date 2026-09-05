@@ -39,9 +39,9 @@ class Server:
     def stop(self, signum, frame):
         logger.info("server-stop", logger.LogResult.in_progress)
         self.should_keep_running = False
+        for client_handler in self.client_handlers:
+            client_handler.stop()
         self.lottery_monitor.stop()
         if self.server_socket:
             self.server_socket.close()
-        for client_handler in self.client_handlers:
-            client_handler.stop()
         logger.info("server-stop", logger.LogResult.success)
