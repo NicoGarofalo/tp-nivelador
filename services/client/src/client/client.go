@@ -11,6 +11,7 @@ import (
 
 const CONNECTION_ATTEMPTS_MAX = 3
 const CONNECTION_ATTEMPS_DELAY_MS = 200
+const FILE_WRITE_PERMS = 0644
 
 type ClientConfig struct {
 	ServerHost string
@@ -58,6 +59,8 @@ func connectToServer(host, port string) (net.Conn, error) {
 	return conn, err
 }
 
+// Función encargada de enviar los batches de las bets.
+// Recibe el protocolo del cliente para enviar los mensajes al server.
 func (client *Client) sendBets(clientProtocol *protocol.Protocol) error {
 	const mainAction = "test-send-bet"
 	const estimatedBetSize = 128
@@ -71,11 +74,11 @@ func (client *Client) sendBets(clientProtocol *protocol.Protocol) error {
 		logger.Error("input-file-open", logger.Fail, messageLog...)
 		return err
 	}
-	defer file.Close()
+	defer file.Close() // Para que ejecute el close cuando sale del scope de la función
 
 	scanner := bufio.NewScanner(file)
 
-	// Envío agency id para comenzar comunicacion
+	// Envío agency id (mensaje handshake) para comenzar comunicacion
 	if err := clientProtocol.SendAgencyId(client.config.AgencyId); err != nil {
 		logger.Error("send-agency-id", logger.Fail, messageLog...)
 		return err
@@ -93,6 +96,8 @@ func (client *Client) sendBets(clientProtocol *protocol.Protocol) error {
 
 		sizeNeeded := len(agencyIdInBytes) + len(line) + 2
 		
+		// Corroboro si el bet que acabo de leer entra en el batch o si está lleno.
+		// Si pasa alguna de las 2, envío lo que tengo y limpio el batch.
 		if len(betBatch) > 0 && (len(betBatch) + sizeNeeded > betBufferSize || betsCount == client.config.BatchSize) {
 			if err := clientProtocol.SendBetBatch(betBatch); err != nil {
 				logger.Error(mainAction, logger.Fail, "message", betBatch)
@@ -104,11 +109,10 @@ func (client *Client) sendBets(clientProtocol *protocol.Protocol) error {
 			logger.Info("send-batch-complete", logger.Success, "batch-size", len(betBatch))
 		}
 
+		// Preparo el contenido de la row todo en bytes porque el buffer es []byte
 		if len(betBatch) > 0 {
 			betBatch = append(betBatch, '\n')
 		}
-
-		// Preparo el contenido de la row
 		betBatch = append(betBatch, agencyIdInBytes...)
 		betBatch = append(betBatch, ',')
 		betBatch = append(betBatch, line...)
@@ -120,6 +124,7 @@ func (client *Client) sendBets(clientProtocol *protocol.Protocol) error {
 		return err
 	}
 
+	// Si termino de leer el file, envío si tengo alguna bet en el batch
 	if len(betBatch) > 0 {
 		if err := clientProtocol.SendBetBatch(betBatch); err != nil {
 			logger.Error(mainAction, logger.Fail, "message", betBatch)
@@ -127,6 +132,7 @@ func (client *Client) sendBets(clientProtocol *protocol.Protocol) error {
 		}
 	}
 
+	// Envío mensaje de que no envío más bets
 	if err := clientProtocol.SendMessageBetsEnd(); err != nil {
 		logger.Error("send-message-bets-end", logger.Fail, messageLog...)
 		return err
@@ -135,11 +141,14 @@ func (client *Client) sendBets(clientProtocol *protocol.Protocol) error {
 	return nil
 }
 
+
+// Función encargada de recibir los ganadores y escribirlos en el archivo de salida.
+// Recibe el protocolo del cliente.
 func (client *Client) receiveWinners(clientProtocol *protocol.Protocol) error {
 	messageLog := []any{"agency-id", client.config.AgencyId}
 
-	// Creo archivo output-x.csv y lo abro
-	outputFile, err := os.OpenFile(client.config.OutputFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
+	// Creo archivo output-x.csv y lo abro como write only, si no existe lo crea.
+	outputFile, err := os.OpenFile(client.config.OutputFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, FILE_WRITE_PERMS)
 	if err != nil {
 		logger.Error("output-file-open", logger.Fail, messageLog...)
 		return err
@@ -147,7 +156,8 @@ func (client *Client) receiveWinners(clientProtocol *protocol.Protocol) error {
 	defer outputFile.Close()
 
 	writer := bufio.NewWriter(outputFile)
-	defer writer.Flush()
+	// Hago flush del buffer a disco cuando se llene el buffer (principalmente para la ultima iteración)
+	defer writer.Flush() 
 	
 	// Recibo los ganadores y los persisto
 	for {
@@ -171,9 +181,16 @@ func (client *Client) receiveWinners(clientProtocol *protocol.Protocol) error {
 	return nil
 }
 
+// Función principal del cliente.
 func (client *Client) Run() error {
 	defer client.conn.Close()
 	
+	// Se estima un tamaño promedio (observación pesimista) de 128 bytes por bet
+	// Se define que el buffer size para el bet sera 128 * el batch size para que
+	// no ocurran reallocs.
+	// De todas maneras si la bet que se está por leer no entra en el batch,
+	// se envía lo que ya se tiene
+	// (ver flujo de sendBets más arriba)
 	const estimatedBetSize = 128
 	betBufferSize := estimatedBetSize * client.config.BatchSize
 	clientProtocol := protocol.NewProtocol(client.conn, betBufferSize)
@@ -189,6 +206,8 @@ func (client *Client) Run() error {
 	return nil
 }
 
+// Función invocada por handle_sigterm en caso de recibir SIGTERM. 
+// Sólo cierra el socket del cliente.
 func (client *Client) Stop() {
 	if client.conn != nil {
 		client.conn.Close()

@@ -28,7 +28,11 @@ class Server:
                     self.client_handlers.append(client_handler)
                     client_handler.start()
                     logger.info(action, logger.LogResult.success)
-                except OSError as e:
+                except OSError as e: 
+                    # Este except está para cuando cuando se ejecuta stop,
+                    # se cierra el server_socket y python levanta una excepción de tipo OSError.
+                    # Para que no se propague, la catcheo y veo si se levantó por stop (should_keep_running deberia ser false).
+                    # En ese caso hago break.
                     if not self.should_keep_running:
                         break
                     raise e
@@ -37,8 +41,15 @@ class Server:
                     raise e
 
     def stop(self, signum, frame):
+        """ 
+        Función que se ejecuta cuando se recibe SIGTERM.
+        Se encarga de detener los client handlers y cerrar el socket aceptador.
+        """
         logger.info("server-stop", logger.LogResult.in_progress)
         self.should_keep_running = False
+        # El orden es importante, primero llamo a detener los hilos
+        # dentro se detienen los sockets de los clientes, y luego detengo el monitor de lottery
+        # para que el thread cuando se despierte se encuentra con el socket cerrado y finaliza su ejecución
         for client_handler in self.client_handlers:
             client_handler.stop()
         self.lottery_monitor.stop()
