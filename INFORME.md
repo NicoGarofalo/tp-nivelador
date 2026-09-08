@@ -23,13 +23,15 @@ El protocolo implementado consiste en enviar mensajes con el siguiente formato:
 
 Los mensajes con código Batch ACK Code, End Bets Code y End Winners Code no tienen `MESSAGE` ni `MSG_SIZE`. El mensaje como tal es únicamente el código ya que el mismo comunica el fin de determinada etapa en el flujo de comunicación entre cliente y servidor.
 
-La idea principal es que el `ClientHandler` sepa que tipo de mensaje recibió para poder saber cómo procesarla. La separación entre códigos internos y los `MessageType` está para separar la responsabilidad. Los internos los interpreta el protocolo, y los transforma en `MessageType` para que el servidor los pueda comprender.
+La idea principal es que el `ClientHandler` sepa qué tipo de mensaje recibió para poder saber cómo procesarla. La separación entre códigos internos y los `MessageType` está para separar la responsabilidad. Los internos los interpreta el protocolo, y los transforma en `MessageType` para que el servidor los pueda comprender.
 
 ## Mecanismos de concurrencia utilizados
 
 Para resolver la necesidad de gestionar cada cliente de forma concurrente se recurrió a crear un Thread para cada uno utilizando `threading.Thread`. la clase `ClientHandler` hereda de `Thread` e implementa el método `run()`. El `client_handler` sabe reconocer qué tipo de mensaje recibió en base a `MessageType`, representando la traducción del byte interno de los tipos de mensajes posibles, gestionados por el protocolo. 
 
-Se detectó como sección crítica el archivo `bets.csv` el cual accede cada `client_handler` del servidor tanto para leer (`load_bets`) como escribir (`store_bets`). Es por esto que se decidió implementar un monitor que encapsulara el acceso al archivo. La concurrencia dentro del monitor está presente en los siguientes casos:
+En base a la fuente proveída sobre el GIL de Python, en este contexto no hay problema en usar threading debido a que las tareas que se ejecutan (socket, lectura y escritura de archivos) son mas de I/O, y en ocasiones Python suele liberar el GIL mientras el thread está esperando la respuesta del recurso externo. Si las tareas fueran de cómputo intensivo de CPU, en ese caso la performance empeoraría ya que el GIL impide que haya multiples threads ejecutando el bytecode de python.
+
+Se detectó como sección crítica el archivo `bets.csv` el cual accede cada `client_handler` del servidor tanto para leer (`load_bets`) como escribir (`store_bets`). Es por esto que se decidió implementar un monitor (`LotteryMonitor`) que encapsulara el acceso al archivo. La concurrencia dentro del monitor está presente en los siguientes casos:
 - Cuando se solicita persistir un batch de apuestas. Al solicitarle esto, el thread debe adquirir el lock de acceso al archivo, lo que hace que el thread se bloquee en caso de que otro ya lo haya adquirido.
 - Cuando se solicita leer los ganadores para un `agency_id` concreto, también se debe adquirir el lock.
 
@@ -41,7 +43,7 @@ Para implementar el quorum, se decidió utilizar una condition variable. Dentro 
 
 ## Casos relevantes del graceful shutdown
 
-Cabe mencionar que cuando el programa recibe el signal SIGTERM, puede ocurrir que haya client_handlers dormidos por la condvar. En caso de que esto ocurra, el `stop()` de lottery_monitor (invocado por el server) despierta a los threads a través del `notify_all()` para que puedan finalizar sus ejecuciones.
+Cabe mencionar que cuando el programa recibe el signal SIGTERM, puede ocurrir que haya `client_handlers` dormidos por la condvar. En caso de que esto ocurra, el `stop()` de `lottery_monitor` (invocado por el server) despierta a los threads a través del `notify_all()` para que puedan finalizar sus ejecuciones.
 
 Para el caso de los threads dormidos por el `file_lock`, si bien no hay una manera de despertarlos cuando reciben un SIGTERM, la escritura y lectura protegida por el lock son acotadas en tiempo (a diferencia del `wait()` de la condvar, que podría ser indefinido si nunca se alcanzara el quorum). Por lo tanto, apenas el hilo que tiene el lock finalice con su uso y lo libere, cada uno de los hilos irán adquiriendo e inmediatamente liberandolo porque la condición de `stop_requested` es True (la cual se valida inmediatamente luego de obtener el lock).
 
